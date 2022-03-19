@@ -3,6 +3,7 @@
 ## tfalk@bu.edu
 ## BU BF591
 ## Assignment Week 6
+#BiocManager::install('ggVennDiagram')
 
 libs <- c("tidyverse", "ggVennDiagram", "BiocManager",
           "DESeq2", "edgeR", "limma")
@@ -34,7 +35,11 @@ for (package in libs) {
 #' @examples counts_df <- load_n_trim("/path/to/counts/verse_counts.tsv")
 load_n_trim <- function(filename) {
 
-  return()
+  data <- as.data.frame(read_delim(filename)) %>%
+    select(c("gene", "vP0_1", "vP0_2", "vAd_1", "vAd_2"))
+  row.names(data) <- data$gene
+  data <- select(data, -gene)
+  return(data)
 }
 
 #' Perform a DESeq2 analysis of rna seq data
@@ -59,7 +64,16 @@ load_n_trim <- function(filename) {
 #' @examples run_deseq(counts_df, coldata, 10, "condition_day4_vs_day7")
 run_deseq <- function(count_dataframe, coldata, count_filter, condition_name) {
   
-  return()
+  dds <- DESeqDataSetFromMatrix(countData = count_dataframe,
+                                colData = coldata,
+                                design = ~ condition)
+  
+  keep <- rowSums(counts(dds)) >= count_filter
+  dds <- dds[keep,]
+  dds <- DESeq(dds)
+  res <- results(dds, name = condition_name)
+  
+  return(res)
 }
 
 #### edgeR ####
@@ -79,8 +93,15 @@ run_deseq <- function(count_dataframe, coldata, count_filter, condition_name) {
 #'
 #' @examples run_edger(counts_df, group)
 run_edger <- function(count_dataframe, group) {
+
+  y <- DGEList(counts=count_dataframe,group=group)
+  keep <- filterByExpr(y)
+  y <- y[keep,]
+  design <- model.matrix(~group)
+  y <- estimateDisp(y, design)
+  et <- exactTest(y)
   
-  return()
+  return(as.data.frame(et$table))
 }
 
  #### limma ####
@@ -103,9 +124,20 @@ run_edger <- function(count_dataframe, group) {
 #' 1,000 smallest p-values.
 #' 
 #' @examples run_limma(counts_df, design, voom=TRUE)
-run_limma <- function(counts_dataframe, design, group) {
+run_limma <- function(counts_dataframe, design, group, voom = TRUE) {
   
-  return()
+  dge <- DGEList(counts=counts_dataframe)
+  keep <- filterByExpr(dge, design)
+  dge <- dge[keep,,keep.lib.sizes=FALSE]
+  if(voom) {
+    v <- voom(dge, design, plot=TRUE)
+    fit <- lmFit(v, design)
+    fit <- eBayes(fit)
+  }
+  
+  limma <- topTable(fit, coef=ncol(design), number = dim(fit)[1], resort.by = "P")
+
+  return(limma)
 }
 
 #### ggplot ####
@@ -137,8 +169,16 @@ run_limma <- function(counts_dataframe, design, group) {
 #' 2 deseq   9.97e-261
 #' 3 deseq   1.16e-206
 combine_pval <- function(deseq, edger, limma) {
-  
-  return()
+  d <- cbind(c('DEseq'), deseq$pvalue)
+  e <- cbind(c('edgeR'), edger$PValue)
+  l <- cbind(c('Limma'), limma$P.Value)
+
+  colnames(d) <- c('package', 'pval')
+  colnames(e) <- c('package', 'pval')
+  colnames(l) <- c('package', 'pval')
+
+  gathered <- rbind(d,e,l)
+  return(as.tibble(gathered))
 }
 
 #' Create three separate facets for each of the diff. exp. pacakges.
@@ -162,7 +202,16 @@ combine_pval <- function(deseq, edger, limma) {
 #' 1  -9.84 2.23e-180 edgeR  
 #' 2   6.18 5.87e-179 edgeR  
 create_facets <- function(deseq, edger, limma) {
+  d <- cbind(deseq$log2FoldChange,deseq$padj, c('DEseq'))
+  e <- cbind(edger$logFC, edger$PAdj, c('edgeR'))
+  l <- cbind(limma$logFC, limma$adj.P.Val, c('Limma'))
   
+  colnames(d) <- c('logFC', 'padj', 'package')
+  colnames(e) <- c('logFC', 'padj', 'package')
+  colnames(l) <- c('logFC', 'padj', 'package')
+  
+  volcano <- rbind(d,e,l)
+  return(as.tibble(volcano))
   return()
 }
 
@@ -193,6 +242,9 @@ create_facets <- function(deseq, edger, limma) {
 #'
 #' @examples p <- theme_plot(volcano)
 theme_plot <- function(volcano_data) {
-  
-  return()
+  vol_plot <-  ggplot(volcano_data, aes(x = logFC, y = -log10(padj))) + 
+    geom_point() +
+    theme_linedraw() +
+    facet_wrap(~package, dir = "h")
+  return(vol_plot)
 }
